@@ -1,0 +1,620 @@
+#!/usr/bin/env python
+
+#THE FOLLOWING LICENSE APPLIES TO ALL CODE
+#EXCEPT THE PART THAT BELONGS TO CLASS TerminalController
+##########################################################
+#The MIT License
+#
+#Copyright (c) 2008 Antonios Anastasiadis, Edward Loper
+#
+#Permission is hereby granted, free of charge, to any person obtaining a copy
+#of this software and associated documentation files (the "Software"), to deal
+#in the Software without restriction, including without limitation the rights
+#to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#copies of the Software, and to permit persons to whom the Software is
+#furnished to do so, subject to the following conditions:
+#
+#The above copyright notice and this permission notice shall be included in
+#all copies or substantial portions of the Software.
+#
+#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+#THE SOFTWARE.
+#
+##########################################################
+
+
+import sys
+import sets
+import glob
+import getopt
+import re
+import os
+
+global VERSION
+VERSION='0.3.1'
+
+class TerminalController:
+    # Cursor movement:
+    BOL = ''             #: Move the cursor to the beginning of the line
+    UP = ''              #: Move the cursor up one line
+    DOWN = ''            #: Move the cursor down one line
+    LEFT = ''            #: Move the cursor left one char
+    RIGHT = ''           #: Move the cursor right one char
+
+    # Deletion:
+    CLEAR_SCREEN = ''    #: Clear the screen and move to home position
+    CLEAR_EOL = ''       #: Clear to the end of the line.
+    CLEAR_BOL = ''       #: Clear to the beginning of the line.
+    CLEAR_EOS = ''       #: Clear to the end of the screen
+
+    # Output modes:
+    BOLD = ''            #: Turn on bold mode
+    BLINK = ''           #: Turn on blink mode
+    DIM = ''             #: Turn on half-bright mode
+    REVERSE = ''         #: Turn on reverse-video mode
+    NORMAL = ''          #: Turn off all modes
+
+    # Cursor display:
+    HIDE_CURSOR = ''     #: Make the cursor invisible
+    SHOW_CURSOR = ''     #: Make the cursor visible
+
+    # Terminal size:
+    COLS = None          #: Width of the terminal (None for unknown)
+    LINES = None         #: Height of the terminal (None for unknown)
+
+    # Foreground colors:
+    BLACK = BLUE = GREEN = CYAN = RED = MAGENTA = YELLOW = WHITE = ''
+    
+    # Background colors:
+    BG_BLACK = BG_BLUE = BG_GREEN = BG_CYAN = ''
+    BG_RED = BG_MAGENTA = BG_YELLOW = BG_WHITE = ''
+    
+    _STRING_CAPABILITIES = """
+    BOL=cr UP=cuu1 DOWN=cud1 LEFT=cub1 RIGHT=cuf1
+    CLEAR_SCREEN=clear CLEAR_EOL=el CLEAR_BOL=el1 CLEAR_EOS=ed BOLD=bold
+    BLINK=blink DIM=dim REVERSE=rev UNDERLINE=smul NORMAL=sgr0
+    HIDE_CURSOR=cinvis SHOW_CURSOR=cnorm""".split()
+    _COLORS = """BLACK BLUE GREEN CYAN RED MAGENTA YELLOW WHITE""".split()
+    _ANSICOLORS = "BLACK RED GREEN YELLOW BLUE MAGENTA CYAN WHITE".split()
+
+    def __init__(self, term_stream=sys.stdout):
+        """
+        Create a `TerminalController` and initialize its attributes
+        with appropriate values for the current terminal.
+        `term_stream` is the stream that will be used for terminal
+        output; if this stream is not a tty, then the terminal is
+        assumed to be a dumb terminal (i.e., have no capabilities).
+        """
+        # Curses isn't available on all platforms
+        try: import curses
+        except: return
+
+        # If the stream isn't a tty, then assume it has no capabilities.
+        if not term_stream.isatty(): return
+
+        # Check the terminal type.  If we fail, then assume that the
+        # terminal has no capabilities.
+        try: curses.setupterm()
+        except: return
+
+        # Look up numeric capabilities.
+        self.COLS = curses.tigetnum('cols')
+        self.LINES = curses.tigetnum('lines')
+        
+        # Look up string capabilities.
+        for capability in self._STRING_CAPABILITIES:
+            (attrib, cap_name) = capability.split('=')
+            setattr(self, attrib, self._tigetstr(cap_name) or '')
+
+        # Colors
+        set_fg = self._tigetstr('setf')
+        if set_fg:
+            for i,color in zip(range(len(self._COLORS)), self._COLORS):
+                setattr(self, color, curses.tparm(set_fg, i) or '')
+        set_fg_ansi = self._tigetstr('setaf')
+        if set_fg_ansi:
+            for i,color in zip(range(len(self._ANSICOLORS)), self._ANSICOLORS):
+                setattr(self, color, curses.tparm(set_fg_ansi, i) or '')
+        set_bg = self._tigetstr('setb')
+        if set_bg:
+            for i,color in zip(range(len(self._COLORS)), self._COLORS):
+                setattr(self, 'BG_'+color, curses.tparm(set_bg, i) or '')
+        set_bg_ansi = self._tigetstr('setab')
+        if set_bg_ansi:
+            for i,color in zip(range(len(self._ANSICOLORS)), self._ANSICOLORS):
+                setattr(self, 'BG_'+color, curses.tparm(set_bg_ansi, i) or '')
+
+    def _tigetstr(self, cap_name):
+        # String capabilities can include "delays" of the form "$<2>".
+        # For any modern terminal, we should be able to just ignore
+        # these, so strip them out.
+        import curses
+        cap = curses.tigetstr(cap_name) or ''
+        return re.sub(r'\$<\d+>[/*]?', '', cap)
+
+    def render(self, template):
+        """
+        Replace each $-substitutions in the given template string with
+        the corresponding terminal control string (if it's defined) or
+        '' (if it's not).
+        """
+        return re.sub(r'\$\$|\${\w+}', self._render_sub, template)
+        
+    def _render_sub(self, match):
+        s = match.group()
+        if s == '$$': return s
+        else:
+            #We try to handle strings of the form ${...} that
+            #might occur in the string (especially if it's
+            #a port description) and will be interpreted as
+            #color variables, while they aren't.
+            try:
+                return getattr(self, s[2:-1])
+            except AttributeError:
+                return s
+            
+
+#####################################################################################
+
+def print_ports(port_list, long_descriptions):
+    """
+    Pretty-prints each given port metadata.
+    """
+    for port in port_list:
+        print term.render('${MAGENTA}* ${GREEN}%s/${BOLD}${YELLOW}%s${NORMAL}' % ('/'.join(port['path'].split('/')[:-1]),port['path'].split('/')[-1]))
+#        print term.render('${MAGENTA}* ${GREEN}%s/${BOLD}${YELLOW}%s${NORMAL}' % ('/'.join(port['path'].split('/')[:-1]),port['pkgname']))
+        print term.render('Name       : ${GREEN}%s${NORMAL}'%port['portname'])
+        print term.render('Version    : ${GREEN}%s${NORMAL}' % port['portversion'])
+        print term.render('Revision   : ${GREEN}%s${NORMAL}' % port['portrevision'])
+        print term.render('Maintainer : ${GREEN}%s${NORMAL}' % port['maintainer'])
+        print term.render("Description: ${CYAN}%s${NORMAL}" % port['short_descr'])
+        print term.render('Categories : ${GREEN}%s${NORMAL}' % ' '.join(port['categories']))
+        if port['installed']:
+            print term.render('Installed  : ${YELLOW}Yes${NORMAL}')
+        else:
+            print term.render('Installed  : ${GREEN}No${NORMAL}')
+        if long_descriptions:
+            print term.render("Verbose description:\n${CYAN}%s${NORMAL}" % get_verbose_descr(port))
+        print
+
+def compact_print_ports(term, port_list):
+    """
+    Pretty-compact-prints a port's data.
+    """
+    max_len = 0
+    if term.COLS:
+        for port in port_list:
+            tempstring = "${GREEN}["
+            if port['installed']:
+                tempstring += "i${GREEN}]"
+            else:
+                tempstring += " ${GREEN}]"
+            tempstring += " " + port['pkgname']
+            if max_len < len(tempstring):
+                    max_len = len(tempstring)
+        for port in port_list:
+            tempstring = "${GREEN}["
+            if port['installed']:
+                tempstring += "i${GREEN}]"
+            else:
+                tempstring += " ${GREEN}]"
+            tempstring += " " + port['pkgname']
+            portname = tempstring + ' ' * (max_len - len(tempstring))
+            #max_len is the max length of the port's status plus port's pkgname.
+            #however, when calculated it contained the '${COLOR}' variables,
+            #so we subtract their length.
+            portdescr = port['short_descr'][0:(term.COLS - max_len)+14]
+            print term.render('%s ${CYAN}%s${NORMAL}' % (portname, portdescr))
+    else:
+        for port in port_list:
+            tempstring = "${GREEN}["
+            if port['installed']:
+                tempstring += "i${GREEN}]"
+            else:
+                tempstring += " ${GREEN}]"
+            tempstring += " " + port['portname'] + "-" + port['portversion']
+            portname = tempstring
+            portdescr = port['short_descr']
+            print term.render('%s ${CYAN}%s${NORMAL}' % (portname, portdescr))
+
+def get_verbose_descr(port):
+    """
+    Reads and returns the port's verbose
+    description from the .descr file.
+    """
+    try:
+        return open(port['path'] + '/pkg-descr', 'r').read()
+    except:
+        return None
+    
+def read_installed_packages():
+    """
+    Reads the installed PORTS from /var/db/pkg.
+    """
+    global INSTALLED
+    #INSTALLED is a dictionary with PKGNAMES as keys
+    #and package dictionaries as values.
+    INSTALLED = {}
+    
+    # list of port directories
+    # ex. /var/db/pkg/xvid-1.1.3_1,1
+    portdirs = [dir for dir in glob.glob('/var/db/pkg/*') if os.path.isdir(dir)]
+    # package names only, ex.
+    # xvid-1.1.3_1,1
+    # make sure we select only directories, not files.
+    pkgnames = [portdir[12:] for portdir in portdirs]
+    for pkgname in pkgnames:
+        portname = pkgname
+        portepoch = portrevision = portversion = None
+        #the pkgname should always contain a dash that
+        #separates the port name from the port version.
+        #this will always be the last dash in the pkgname string.
+        #The port naming specification is specified in
+        #http://www.freebsd.org/doc/en_US.ISO8859-1/books/porters-handbook/makefile-naming.html
+        portversion = portname.split('-')[-1]
+        portname = '-'.join(portname.split('-')[:-1])
+        if ',' in portversion:
+            portepoch = portversion.split(',')[ - 1]
+            portversion = ','.join(portversion.split(',')[:-1])
+        if '_' in portversion:
+            portrevision = portversion.split('_')[ - 1]
+            portversion = '_'.join(portversion.split('_')[:-1])
+        contents = open(portdirs[pkgnames.index(pkgname)] + '/+CONTENTS').read()
+        origin = contents.split('@comment ORIGIN:')[1].split('@cwd')[0][: - 1]
+        INSTALLED[pkgname] = {
+                        'pkgname':pkgname,
+                        'portname':portname,
+                        'portversion':portversion,
+                        'portrevision':portrevision,
+                        'portepoch':portepoch,
+                        'origin':origin,
+                        }
+
+def compare_versions(v1, v2):
+    """
+    Returns -1 if v1<v2
+             1 if v1>v2
+             0 if v1 and v2 are completely different
+    """
+    v1 = v1.split('.')
+    v2 = v2.split('.')
+    major_number_1 = int(v1[0][0])
+    major_number_2 = int(v2[0][0])
+    if v1 < v2:
+        return 0
+
+def check_installed():
+    global PKGNAMES, INSTALLED, PORTNAMES
+    installs=0
+    for pkgname in INSTALLED.keys():
+        #Check the easy ones first.
+        #If a port exists exactly with the same name, version etc.
+        #as a package, marked it installed.
+        if pkgname in PKGNAMES:
+            PKGNAMES[pkgname]['installed']=True
+            installs+=1
+        else:
+            #gather all ports whose simple name matches this
+            #package's simple name. For example, 'firefox' should
+            #match at least the firefox 2 and firefox 3 ports.
+            _matching_ports = PORTNAMES.get(INSTALLED[pkgname]['portname'])
+            matching_ports=_matching_ports[:] if _matching_ports is not None else None
+            if matching_ports:
+                #check if we found more than one port matching
+                #our package's ${PORTNAME}.
+                if len(matching_ports)==1:
+                    PKGNAMES[matching_ports[0]['pkgname']]['installed']=True
+                    installs+=1
+                else:
+                    #there are many ports with the same ${PORTNAME}
+                    #as the installed package.
+                    #time to find the port that
+                    #matches our package's exact version.
+                    best_port = None
+                    largest = 0
+                    counter = 0
+                    installed_version=INSTALLED[pkgname]['portversion']
+                    while len(matching_ports) > 1:
+                        for port in matching_ports:
+                            try:
+                                if port['portversion'][counter] != installed_version[counter]:
+                                    matching_ports.remove(port)
+                            #catch index error in case versions are of different length
+                            except IndexError:
+                                matching_ports.remove(port)
+                        counter += 1
+                    #now, either all matching ports were removed
+                    # or only one port (the closest match) remains. Mark it as installed.
+                    if len(matching_ports)==1:
+                        PKGNAMES[matching_ports[0]['pkgname']]['installed']=True
+                        installs+=1
+    
+def read_ports():
+    """
+    Reads all PORTS from the INDEX
+    file and returns a list of them.
+    """
+    global PKGNAMES
+    global CATEGORIES
+    global PORTNAMES
+    #PKGNAMES contains pkgnames (full port name+versions etc ex. gtkmumble-0.3_2,1)
+    #as keys and port dictionaries as values.
+    #PORTNAMES contains portnames (simple names, ex. 'gtkmumble') as keys
+    #and lists of port dictionaries as values, because many ports might have
+    #the same ${PORTNAME}.
+    #PORT is a dictionary that defines a single port.
+    #The FreeBSD porter's handbook defines the following
+    #variables regarding each port's name:
+    #PORTNAME=       gtkmumble
+    #PORTVERSION=    0.3
+    #PORTEPOCH=      1
+    #PORTREVISION=   2
+    #PKGNAME= gtkmumble-0.3_2,1
+    PKGNAMES = {}
+    PORTNAMES={}
+    CATEGORIES = {}
+    
+    indexes=['INDEX','INDEX-6','INDEX-7','INDEX-8','INDEX-9']
+    indexfile=None
+    for filename in indexes:
+        if os.path.isfile("/usr/ports/"+filename):
+            indexfile=filename
+    if not indexfile:
+        PORTNAMES={}
+        return
+    fin = open("/usr/ports/"+indexfile, 'r')
+    print_info("Opened %s"%indexfile)
+    lines = fin.readlines()
+    fin.close()
+    
+    for line in lines:
+        values = line.split('|')
+        port = {}
+        port['pkgname'] = values[0]
+        port['portname'] = '-'.join(values[0].split('-')[: - 1])
+        remaining = values[0]
+        portepoch = portrevision = None
+        if ',' in remaining:
+            portepoch = remaining.split(',')[ - 1]
+            remaining = remaining.split(',')[0]
+        if '_' in remaining:
+            portrevision = remaining.split('_')[ - 1]
+            remaining = remaining.split('_')[0]
+        if '-' in remaining:
+            portversion = remaining.split('-')[ - 1]
+            remaining = '-'.join(remaining.split('-')[: - 1])
+        port['portepoch']=portepoch
+        port['portversion']=portversion
+        port['portrevision']=portrevision
+        port['path'] = values[1]
+        port['short_descr'] = values[3]
+        #store lowered maintainer string to ease search.
+        port['maintainer'] = values[5].lower()
+        port['categories'] = values[6].split()
+        #we also store categories separately
+        for cat in port['categories']:
+            if cat not in CATEGORIES:
+                CATEGORIES[cat] = [port]
+            else:
+                CATEGORIES[cat].append(port)
+        #Long descriptions are not in the INDEX file,
+        #which means we must explicitely open each port's
+        #pkg-descr file. This would take a long time if we
+        #did it for each port, so we set them as None now
+        #and if needed later, we update requested data.
+        port['long_descr'] = None
+        #We also check later if a port is installed.
+        port['installed'] = False
+        
+        PKGNAMES[port['pkgname']] = port
+        if port['portname'] in PORTNAMES:
+            PORTNAMES[port['portname']].append(port)
+        else:
+            PORTNAMES[port['portname']]=[port]
+
+def find_ports(args):
+    """
+    Returns the port entry
+    that has a name equal (-e) to the given one,
+    or a name that contains the given terms.
+    """
+    global PKGNAMES
+    global PORTNAMES
+    if args['exact_search']:
+        found_ports = []
+        for portname in PORTNAMES:
+            for term in args['search_terms']:
+                if term == portname.lower():
+                    found_ports+=PORTNAMES[portname]
+        return found_ports
+    else:
+        ports_found = []
+        for term in args['search_terms']:
+            for found_port in search_port_name(term):
+                ports_found.append(found_port)
+        return ports_found
+    
+def search_port_name(term):
+    """
+    Searches the PORTS for PORTS
+    with name similar to the given one.
+    Returns: a list of ports (dictionaries)
+    """
+    global PKGNAMES
+    portnames = PKGNAMES.keys()
+    found_ports = []
+    for portname in portnames:
+        if term in portname.lower():
+            found_ports.append(PKGNAMES[portname])
+    return found_ports
+
+def filter_ports(ports_list, args):
+    """
+    Filters ports according to the
+    given categories,installed status
+    and maintainer.
+    """
+    remaining_ports = []
+    for port in ports_list:
+        port_passed = True
+        if args['installed'] is not None:
+            if port['installed'] != args['installed']:
+                port_passed = False
+        if port_passed and args['maintainers']:
+            found_maintainer=False
+            for maintainer in args['maintainers']:
+                if maintainer in port['maintainer']:
+                    found_maintainer=True
+            port_passed=found_maintainer
+        if port_passed and args['categories']:
+            port_passed = False
+            for category in port['categories']:
+                if category in args['categories']:
+                    port_passed = True
+                    break;
+        if port_passed:
+            remaining_ports.append(port)
+    return remaining_ports
+
+def get_arguments():
+    """
+    Parses the command line arguments
+    and sets global variables accordingly.
+    """
+    global term
+    #dictionary that will hold data given by the user
+    args = {}
+    args['categories'] = []
+    args['maintainers'] = []
+    args['long_descriptions'] = False
+    args['compact_print'] = True
+    args['exact_search'] = False
+    args['installed'] = None
+    args['search_terms'] = []
+    args['statistics_only'] = False
+
+    try:
+        optlist, arguments = getopt.getopt(sys.argv[1:], 'vsec:m:i:',["help","version"])
+        #force lowercase search terms, in order to ease searching.
+        args['search_terms'] = [argument.lower() for argument in arguments]
+        for o, a in optlist:
+            if o == "--version":
+                print VERSION
+                sys.exit(0)
+            if o == "--help":
+                show_syntax()
+            if o == '-i':
+                if a.lower() == 'yes':
+                    args['installed'] = True
+                elif a.lower() == 'no':
+                    args['installed'] = False
+                else:
+                    show_syntax()
+            elif o == '-c':
+                #flag_search_categories is set later
+                args['categories'].append(a)
+            elif o == '-e':
+                args['exact_search'] = True
+                if len(arguments) == 0:
+                    print "Need at least one argument if -e is specified"
+                    show_syntax()
+                print_info("Searching for ports mathing exact names '%s'." % ','.join(args['search_terms']))
+            elif o == '-p':
+                args['compact_print'] = True
+            elif o == '-s':
+                args['statistics_only'] = True
+            elif o == '-v':
+                args['long_descriptions'] = True
+                print_info("Showing verbose descriptions.")
+                args['compact_print'] = False
+            if o == '-m':
+                #flag_search_categories is set later
+                #store lowered maintainer strings to ease searching.
+                args['maintainers'].append(a.lower())
+
+        if len(arguments) == 0:
+            print_info("No search term given, searching all ports.")
+        if args['installed'] is not None:
+            if args['installed']:
+                print_info("Searching only for ports that are installed.")
+            else:
+                print_info("Searching only for non-installed ports.")
+        if len(args['categories']) > 0:
+            print_info("Searching only in categories '%s'" % ','.join(args['categories']))
+        if len(args['maintainers']) > 0:
+            print_info("Searching only for maintainers '%s'" % ','.join(args['maintainers']))
+        return args
+    except getopt.GetoptError:
+        print "Invalid Syntax. Try --help"
+        sys.exit(1)
+
+def print_info(s):
+    """
+    Prints a string with the standard message colors.
+    """
+    global term
+    print term.render('${GREEN}* ${BLUE}%s${NORMAL}' % s)
+def print_warning(s):
+    """
+    Prints a string with the standard warning color.
+    """
+    global term
+    print term.render('${GREEN}* ${RED}%s${NORMAL}' % s)
+
+def show_syntax():
+    print "Syntax: %s [-e] [-d] [-q] [-m maintainer] [-c category] [-i [1|0]] [term1 [term2]...]"%sys.argv[0]
+    print "-e Exact port name match"
+    print "-v Show verbose (large) port descriptions"
+    print "-c <category> Search for PORTS only in category"
+    print "-m <maintainer> Search for PORTS maintained only by maintainer"
+    print "-i yes/no Search only for installed/non installed ports"
+    print("-s Print port statistics only.")
+    sys.exit(1)
+
+#############################################################################
+
+
+def search():
+    global PKGNAMES
+    global INSTALLED
+    global CATEGORIES
+    global args
+    global term
+
+    term = TerminalController()
+    args = get_arguments()
+    installed = read_installed_packages()
+    read_ports()
+    check_installed()
+
+    print_info("Found %d installed packages." % len(INSTALLED))
+    print_info('Found %d indexed ports in %d categories.' % (len(PKGNAMES), len(CATEGORIES)))
+    
+    if args['statistics_only']:
+        sys.exit(0)
+    if not args['search_terms']:
+        ports = [PKGNAMES[portname] for portname in PKGNAMES.keys()]
+    else:
+        ports = find_ports(args)
+        
+    ports = filter_ports(ports, args)
+
+    if ports != []:
+        print_info("%d matches found:" % len(ports))
+        if args['compact_print']:
+            compact_print_ports(term, ports)
+        else:
+            print_ports(ports, args['long_descriptions'])
+    else:
+        if args['exact_search']:
+            print_warning("No exact match found. You can try without '-e'.")
+        else:
+            print_warning("Cannot find a relevant port.")
+
+if __name__ == '__main__':
+    search()

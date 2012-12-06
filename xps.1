@@ -1,0 +1,51 @@
+.\" Man page for EPS (Exquisite Port Seeker)
+.\" Contact antonakis@gmail.com to correct errors or omissions. 
+.TH man 1 "04 December 2008" "0.1"
+
+.SH NAME
+xps - eXquisite Port Seeker
+
+.SH SYNOPSIS
+xps [options] terms
+.SH DESCRIPTION
+xps is a tool that searches the ports INDEX file and prints all ports whose names contain the given terms and match the specified criterias.
+.P
+The default mode prints a line for each port found. The brackets in the beginning of each line show the port's status. For the time being, this may only contain 'i' if the port is installed.
+.SH EXAMPLES
+.P
+Show all ports whose names contain 'firefox' and print verbose descriptions:
+.IP
+xps -v firefox
+.P
+Show all ports in category 'devel' with exact name 'python'.
+.IP
+xps -e -c devel python
+.P
+Show all ports whose names contain 'glib' and are installed:
+.IP
+xps -i yes glib
+.P
+Show all ports maintained by <author> in category <category>:
+.IP
+xps -m <author> -c <category>
+.SH OPTIONS
+.IP "-c <category>"
+Show ports only from this category.
+.IP "-e"
+Exact match. Show only ports that their name is an exact match of the given term.
+.IP "-i yes/no"
+Show only installed/non-installed ports.
+.IP "-m <maintainer>"
+Show only ports maintained by <maintainer>.
+.IP "-v"
+Show verbose descriptions.
+.IP "-s"
+Print port statistics and exit.
+.IP "--version"
+Show program version and exit.
+.SH BUGS
+The code that matches installed packages with indexed ports needs a lot of work, expect bugs in this area.
+.SH AUTHOR
+.nf
+Antonios Anastasiadis (antonakis@gmail.com)
+.fi
