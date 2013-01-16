@@ -1,5 +1,5 @@
 .\" Man page for EPS (Exquisite Port Seeker)
-.\" Contact antonakis@gmail.com to correct errors or omissions. 
+.\" Contact antonakis@gmail.com to correct errors or omissions.
 .TH man 1 "04 December 2008" "0.1"
 
 .SH NAME
@@ -39,6 +39,12 @@ Show only installed/non-installed ports.
 Show only ports maintained by <maintainer>.
 .IP "-v"
 Show verbose descriptions.
+.IP "-E <regex>"
+Show ports that thier name matches given regular expression.
+.IP "-D <string>"
+Show ports whose short description contain given string.
+.IP "-DE <regex>"
+Show ports whose short description match given regular expression.
 .IP "-s"
 Print port statistics and exit.
 .IP "--version"

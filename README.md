@@ -21,3 +21,9 @@ xps -i yes glib
 
 Show all ports maintained by <author> in category <category>:
 xps -m <author> -c <category>
+
+Show all ports that contain 'pdf' in thier short description:
+xps -D pdf
+
+Show ports whose name starts with 'gnome':
+xps -E '^gnome'

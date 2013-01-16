@@ -522,7 +522,7 @@ def search_port_short_descr(term):
     portnames = PKGNAMES.keys()
     found_ports = []
     for portname in portnames:
-        if term in PKGNAMES[portname]['short_descr']:
+        if term in PKGNAMES[portname]['short_descr'].lower():
             found_ports.append(PKGNAMES[portname])
     return found_ports
 def search_port_short_descr_regex(term):
@@ -536,7 +536,7 @@ def search_port_short_descr_regex(term):
     found_ports = []
     re_stmt=re.compile(term)
     for portname in portnames:
-        if re.search(re_stmt, PKGNAMES[portname]['short_descr']):
+        if re.search(re_stmt, PKGNAMES[portname]['short_descr'].lower()):
             found_ports.append(PKGNAMES[portname])
     return found_ports
 
