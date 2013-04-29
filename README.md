@@ -27,3 +27,6 @@ xps -D pdf
 
 Show ports whose name starts with 'gnome':
 xps -E '^gnome'
+
+Show ports that can be updated to newer version:
+xps -u yes

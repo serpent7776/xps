@@ -1,6 +1,6 @@
-.\" Man page for EPS (Exquisite Port Seeker)
+.\" Man page for XPS (eXquisite Port Seeker)
 .\" Contact anastasiadis@datalive.gr to correct errors or omissions.
-.TH man 1 "04 December 2008" "0.4"
+.TH xps 1 "04 December 2008" "0.41"
 
 .SH NAME
 xps - eXquisite Port Seeker
@@ -10,7 +10,11 @@ xps [options] terms
 .SH DESCRIPTION
 xps is a tool that searches the ports INDEX file and prints all ports whose names contain the given terms and match the specified criterias.
 .P
-The default mode prints a line for each port found. The brackets in the beginning of each line show the port's status. For the time being, this may only contain 'i' if the port is installed.
+The default mode prints a line for each port found. The brackets in the beginning of each line show the port's status:
+.IP "'i'"
+the port is installed
+.IP "'u'"
+the port is installed and can be updated
 .SH EXAMPLES
 .P
 Show all ports whose names contain 'firefox' and print verbose descriptions:
@@ -28,6 +32,14 @@ xps -i yes glib
 Show all ports maintained by <author> in category <category>:
 .IP
 xps -m <author> -c <category>
+.P
+Show all ports that contain 'pdf' in thier short description:
+.IP
+xps -D pdf
+.P
+Show ports whose name starts with 'gnome':
+.IP
+xps -E '^gnome'
 .SH OPTIONS
 .IP "-c <category>"
 Show ports only from this category.
@@ -35,6 +47,8 @@ Show ports only from this category.
 Exact match. Show only ports that their name is an exact match of the given term.
 .IP "-i yes/no"
 Show only installed/non-installed ports.
+.IP "-u yes/no"
+Show ports that are installed and can/cannot be updated.
 .IP "-m <maintainer>"
 Show only ports maintained by <maintainer>.
 .IP "-v"
@@ -50,7 +64,9 @@ Print port statistics and exit.
 .IP "--version"
 Show program version and exit.
 .SH BUGS
+.P
 * The code that matches installed packages with indexed ports needs a lot of work, expect bugs in this area.
+.P
 * xps is broken in systems migrated to pkgng. Expect this to be solved in a newer version.
 .SH AUTHOR
 .nf
