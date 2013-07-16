@@ -29,7 +29,7 @@
 ##########################################################
 
 import sys
-import sets
+#import sets
 import glob
 import getopt
 import re
@@ -295,7 +295,11 @@ def read_installed_packages():  #{{{
         #The port naming specification is specified in
         #http://www.freebsd.org/doc/en_US.ISO8859-1/books/porters-handbook/makefile-naming.html
         contents = open(portdirs[pkgnames.index(pkgname)] + '/+CONTENTS').read()
-        origin=re.search(re_origin, contents)
+        match=re.search(re_origin, contents)
+        if match is not None:
+            origin=re.search(re_origin, contents).group(1)
+        else:
+            origin=None
         INSTALLED[pkgname] = {
                         'pkgname':pkgname,
                         'portname':data.group(1),
@@ -312,6 +316,7 @@ def compare_versions(p1, p2):   #{{{
              1 if p1 is newer
              0 if p1 and p2 are the same
     """
+
     #first we check portepoch
     if p1['portepoch']!=p2['portepoch']:
         if p1['portepoch']>p2['portepoch']:
@@ -320,24 +325,41 @@ def compare_versions(p1, p2):   #{{{
             return -1
 
     #if portepoch are the same, check port versions
-    #compare as strings - portversion can contain letters
+    #port version is built from components separated with '.'
+    #we compare each component independently
     v1 = p1['portversion'].split('.')
     v2 = p2['portversion'].split('.')
-    if len(v1)!=len(v2):
-        #assume the longer version is newer
-        if len(v1)>len(v2):
-            return 1
-        else:   #len(v1)<len(v2)
-            return -1
-    length=len(v1)
+
+    v1len=len(v1)
+    v2len=len(v2)
+    #both port versions should consist of the same number of components
+    #if they don't, we check only the common part
+    length=min(v1len, v2len)
+    #each component is digits prefixed/suffixed with letters
+    re_vecomponent=re.compile('([a-z]*)(\\d+)([a-z]*)', re.I)
     while length>0:
-        v1n=v1.pop(0)
-        v2n=v2.pop(0)
+        v1c=v1.pop(0)
+        v2c=v2.pop(0)
+        m1=re.match(re_vecomponent, v1c);
+        m2=re.match(re_vecomponent, v2c);
+        #compare prefix part
+        r=cmp(m1.group(1), m2.group(1))
+        if r!=0: return r
+        #compare digits part
+        r=cmp(int(m1.group(2)), int(m2.group(2)))
+        if r!=0: return r
+        #compare suffix part
+        r=cmp(m1.group(3), m2.group(3))
+        if r!=0: return r
         length-=1
-        if v1n<v2n:
-            return -1
-        elif v1n>v2n:
+
+    if v1len!=v2len:
+        #We checked that port versions components are equal
+        #if one of the components is longer, we assume it's newer
+        if v1len>v2len:
             return 1
+        else:   #v1len<v2len
+            return -1
 
     #finally check port revisions
     #we convert it to int, because it cannot contain letters
@@ -354,10 +376,10 @@ def compare_versions(p1, p2):   #{{{
 
     return 0    #v1 and v2 are the same
 #}}}
-def check_installed():  #{{{
-    global PKGNAMES, INSTALLED, PORTNAMES
-    installs=0
-    update_values=[False, True, None]
+def check_installed(): #{{{
+    global PKGNAMES, INSTALLED, PORTNAMES, PORTORIGINS
+    installs=0  #number of installed packages
+    update_values=[None, True, False]
     for pkgname in INSTALLED.keys():
         #Check the easy ones first.
         #If a port exists exactly with the same name, version etc.
@@ -369,44 +391,21 @@ def check_installed():  #{{{
             PKGNAMES[pkgname]['updateavail']=update_values[v]
             installs+=1
         else:
-            #gather all ports whose simple name matches this
-            #package's simple name. For example, 'firefox' should
-            #match at least the firefox 2 and firefox 3 ports.
-            _matching_ports = PORTNAMES.get(INSTALLED[pkgname]['portname'])
-            matching_ports=_matching_ports[:] if _matching_ports is not None else None
-            if matching_ports:
-                #check if we found more than one port matching
-                #our package's ${PORTNAME}.
-                if len(matching_ports)==1:
-                    PKGNAMES[matching_ports[0]['pkgname']]['installed']=True
-                    PKGNAMES[matching_ports[0]['pkgname']]['installedpkgname']=pkgname
-                    v=compare_versions(PKGNAMES[matching_ports[0]['pkgname']], INSTALLED[pkgname])
-                    PKGNAMES[matching_ports[0]['pkgname']]['updateavail']=update_values[v]
+            #if pkgname cannot be found, we search for port based on origin
+            #(i.e. category/portname)
+            origin=INSTALLED[pkgname]['origin']
+            if origin in PORTORIGINS:
+                pkg_name=PORTORIGINS[origin]['pkgname']
+                if INSTALLED[pkgname]['portname']==PKGNAMES[pkg_name]['portname']:
+                    #make sure the portname is the same
+                    PKGNAMES[pkg_name]['installed']=True
+                    PKGNAMES[pkg_name]['installedpkgname']=pkgname
+                    v=compare_versions(PKGNAMES[pkg_name], INSTALLED[pkgname])
+                    PKGNAMES[pkg_name]['updateavail']=update_values[v]
                     installs+=1
-                else:
-                    #there are many ports with the same ${PORTNAME}
-                    #as the installed package.
-                    #time to find the port that
-                    #matches our package's exact version.
-                    counter = 0
-                    installed_version=INSTALLED[pkgname]['portversion']
-                    while len(matching_ports) > 1:
-                        for port in matching_ports:
-                            try:
-                                if port['portversion'][counter] != installed_version[counter]:
-                                    matching_ports.remove(port)
-                            #catch index error in case versions are of different length
-                            except IndexError:
-                                matching_ports.remove(port)
-                        counter += 1
-                    #now, either all matching ports were removed
-                    # or only one port (the closest match) remains. Mark it as installed.
-                    if len(matching_ports)==1:
-                        PKGNAMES[matching_ports[0]['pkgname']]['installed']=True
-                        PKGNAMES[matching_ports[0]['pkgname']]['installedpkgname']=pkgname
-                        v=compare_versions(PKGNAMES[matching_ports[0]['pkgname']], INSTALLED[pkgname])
-                        PKGNAMES[matching_ports[0]['pkgname']]['updateavail']=update_values[v]
-                        installs+=1
+                #else: #origin matches, but portname doesn't, probably port was moved
+                #TODO: is it safe to ignore this port?
+            #else: #no such origin in ports tree
 #}}}
 def read_ports():   #{{{
     """
@@ -416,11 +415,13 @@ def read_ports():   #{{{
     global PKGNAMES
     global CATEGORIES
     global PORTNAMES
+    global PORTORIGINS
     #PKGNAMES contains pkgnames (full port name+versions etc ex. gtkmumble-0.3_2,1)
     #as keys and port dictionaries as values.
     #PORTNAMES contains portnames (simple names, ex. 'gtkmumble') as keys
     #and lists of port dictionaries as values, because many ports might have
     #the same ${PORTNAME}.
+    #PORTORIGINS contain port origin as keys and port dictionaries as values
     #PORT is a dictionary that defines a single port.
     #The FreeBSD porter's handbook defines the following
     #variables regarding each port's name:
@@ -432,6 +433,7 @@ def read_ports():   #{{{
     PKGNAMES = {}
     PORTNAMES={}
     CATEGORIES = {}
+    PORTORIGINS = {}
     
     indexes=['INDEX','INDEX-9','INDEX-8','INDEX-7','INDEX-6']
     indexfile=None
@@ -448,6 +450,7 @@ def read_ports():   #{{{
     fin.close()
     
     re_pkgname=re.compile('(.*)-([a-zA-Z\d\.]+)(?:_(\w+))?(?:,(\w+))?')
+    re_origin=re.compile('/usr/ports/(.*)')
     for line in lines:
         values = line.split('|')
         port = {}
@@ -480,6 +483,8 @@ def read_ports():   #{{{
         #True: port is installed and can be updated; False: port is installed and cannot be updated; None: port is not installed
         port['updateavail'] = None
         
+        match=re.match(re_origin, port['path']);
+        PORTORIGINS[match.group(1)] = port
         PKGNAMES[port['pkgname']] = port
         if port['portname'] in PORTNAMES:
             PORTNAMES[port['portname']].append(port)
