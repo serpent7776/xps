@@ -336,7 +336,7 @@ def compare_versions(p1, p2):   #{{{
     #if they don't, we check only the common part
     length=min(v1len, v2len)
     #each component is digits prefixed/suffixed with letters
-    re_vecomponent=re.compile('([a-z]*)(\\d+)([a-z]*)', re.I)
+    re_vecomponent=re.compile('([a-z]*)(\\d*)([a-z]*)', re.I)
     while length>0:
         v1c=v1.pop(0)
         v2c=v2.pop(0)
