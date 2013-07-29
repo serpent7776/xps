@@ -36,7 +36,7 @@ import re
 import os
 
 global VERSION
-VERSION='0.5'
+VERSION='0.5.2'
 
 class TerminalController:   #{{{
     #THE FOLLOWING LICENSE APPLIES TO
@@ -343,14 +343,17 @@ def compare_versions(p1, p2):   #{{{
         m1=re.match(re_vecomponent, v1c);
         m2=re.match(re_vecomponent, v2c);
         #compare prefix part
-        r=cmp(m1.group(1), m2.group(1))
-        if r!=0: return r
+        if len(m1.group(1)) and len(m2.group(1)):
+            r=cmp(m1.group(1), m2.group(1))
+            if r!=0: return r
         #compare digits part
-        r=cmp(int(m1.group(2)), int(m2.group(2)))
-        if r!=0: return r
+        if len(m1.group(2)) and len(m2.group(2)):
+            r=cmp(int(m1.group(2)), int(m2.group(2)))
+            if r!=0: return r
         #compare suffix part
-        r=cmp(m1.group(3), m2.group(3))
-        if r!=0: return r
+        if len(m1.group(3)) and len(m2.group(3)):
+            r=cmp(m1.group(3), m2.group(3))
+            if r!=0: return r
         length-=1
 
     if v1len!=v2len:
